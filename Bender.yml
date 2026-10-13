@@ -19,6 +19,7 @@ dependencies:
   fpnew: { git: "https://github.com/pulp-platform/fpnew.git", version: 0.6.1 }
   common_cells: { git: "https://github.com/pulp-platform/common_cells.git", version: 1.16.4 }
   tech_cells_generic: { git: "https://github.com/pulp-platform/tech_cells_generic.git", version: 0.1.1 }
+  redundancy_cells: { git: "https://github.com/FondazioneChipsIT/redundancy_cells.git", rev: "3c7c57e80fe2f65812db092182ce68ee810943df" }
 
 sources:
   include_dirs:
