@@ -1,0 +1,29 @@
+// Copyright 2022 OpenHW Group
+// Solderpad Hardware License, Version 2.1, see LICENSE.md for details.
+// SPDX-License-Identifier: Apache-2.0 WITH SHL-2.1
+{
+  name: "redundancy_cells",
+  target_dir: "redundancy_cells",
+
+  upstream: {
+    url: "https://github.com/FondazioneChipsIT/redundancy_cells.git",
+    rev: "3c7c57e80fe2f65812db092182ce68ee810943df",
+  },
+
+  exclude_from_upstream: [
+    ".github",
+    ".gitignore",
+    ".gitlab-ci.yml",
+    "Bender.yml",
+    "CHANGELOG.md",
+    "LICENSE.md",
+    "Makefile",
+    "README.md",
+    "requirements.txt",
+    "run_tests.sh",
+    "src_files.yml",
+    "test",
+    "util"
+  ]
+
+}
