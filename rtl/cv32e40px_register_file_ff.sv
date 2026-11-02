@@ -212,9 +212,9 @@ module cv32e40px_register_file #(
       assign rport_a_en[0]  = 1'b1;
       assign rport_b_en[0]  = 1'b1;
       assign rport_c_en[0]  = 1'b1;
-      assign rport_a_en[1]  = (dualread_i[0] == 1'b1) 
-      assign rport_b_en[1]  = (dualread_i[1] == 1'b1) 
-      assign rport_c_en[1]  = (dualread_i[2] == 1'b1) 
+      assign rport_a_en[1]  = (dualread_i[0] == 1'b1);
+      assign rport_b_en[1]  = (dualread_i[1] == 1'b1);
+      assign rport_c_en[1]  = (dualread_i[2] == 1'b1);
 
       always_comb begin
         // Channel 0 raw read
