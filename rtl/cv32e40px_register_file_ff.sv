@@ -208,13 +208,13 @@ module cv32e40px_register_file #(
       assign raddr_b_eff[1] = {raddr_b_i[ADDR_WIDTH-1:1], raddr_b_i[0] | 1'b1};
       assign raddr_c_eff[1] = {raddr_c_i[ADDR_WIDTH-1:1], raddr_c_i[0] | 1'b1};
 
-      // Port enables (avoid duplicate scrubbing if raddr[0] == 1'b1)
+      // Port enables
       assign rport_a_en[0]  = 1'b1;
       assign rport_b_en[0]  = 1'b1;
       assign rport_c_en[0]  = 1'b1;
-      assign rport_a_en[1]  = (dualread_i[0] == 1'b1) && (raddr_a_i[0] == 1'b0);
-      assign rport_b_en[1]  = (dualread_i[1] == 1'b1) && (raddr_b_i[0] == 1'b0);
-      assign rport_c_en[1]  = (dualread_i[2] == 1'b1) && (raddr_c_i[0] == 1'b0);
+      assign rport_a_en[1]  = (dualread_i[0] == 1'b1) 
+      assign rport_b_en[1]  = (dualread_i[1] == 1'b1) 
+      assign rport_c_en[1]  = (dualread_i[2] == 1'b1) 
 
       always_comb begin
         // Channel 0 raw read
