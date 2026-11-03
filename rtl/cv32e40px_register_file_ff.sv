@@ -20,6 +20,11 @@
 // Project Name:   RI5CY / CV32E40PX                                          //
 // Language:       SystemVerilog                                              //
 //                                                                            //
+// Description:    Register file with 31x 39 bit wide registers. Register 0   //
+//                 is fixed to 0. This register file is based on flip-flops.  //
+//                 Also supports the fp-register file now if FPU=1            //
+//                 If ZFINX is 1, floating point operations take values       //
+//                 from the X register file                                   //
 ////////////////////////////////////////////////////////////////////////////////
 
 //------------------------------------------------------------------------------
