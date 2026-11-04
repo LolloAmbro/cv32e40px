@@ -198,7 +198,6 @@ module cv32e40px_register_file #(
   logic [X_DUALREAD:0][ECC_WIDTH-1:0]  rdata_a_raw, rdata_b_raw, rdata_c_raw;
   logic [X_DUALREAD:0][ECC_WIDTH-1:0]  rdata_a_cor, rdata_b_cor, rdata_c_cor;
   logic [X_DUALREAD:0][ADDR_WIDTH-1:0] raddr_a_eff, raddr_b_eff, raddr_c_eff;
-  logic [X_DUALREAD:0]                 rport_a_en,  rport_b_en,  rport_c_en;
   logic [X_DUALREAD:0][1:0]            err_a_raw,   err_b_raw,   err_c_raw;
 
   generate
@@ -212,14 +211,6 @@ module cv32e40px_register_file #(
       assign raddr_a_eff[1] = {raddr_a_i[ADDR_WIDTH-1:1], raddr_a_i[0] | 1'b1};
       assign raddr_b_eff[1] = {raddr_b_i[ADDR_WIDTH-1:1], raddr_b_i[0] | 1'b1};
       assign raddr_c_eff[1] = {raddr_c_i[ADDR_WIDTH-1:1], raddr_c_i[0] | 1'b1};
-
-      // Port enables
-      assign rport_a_en[0]  = 1'b1;
-      assign rport_b_en[0]  = 1'b1;
-      assign rport_c_en[0]  = 1'b1;
-      assign rport_a_en[1]  = (dualread_i[0] == 1'b1);
-      assign rport_b_en[1]  = (dualread_i[1] == 1'b1);
-      assign rport_c_en[1]  = (dualread_i[2] == 1'b1);
 
       always_comb begin
         // Channel 0 raw read
@@ -251,10 +242,6 @@ module cv32e40px_register_file #(
       assign raddr_b_eff[0] = raddr_b_i;
       assign raddr_c_eff[0] = raddr_c_i;
 
-      assign rport_a_en[0]  = 1'b1;
-      assign rport_b_en[0]  = 1'b1;
-      assign rport_c_en[0]  = 1'b1;
-
       assign rdata_a_raw[0] = raddr_a_i[5] ? mem_fp[raddr_a_i[4:0]] : mem[raddr_a_i[4:0]];
       assign rdata_b_raw[0] = raddr_b_i[5] ? mem_fp[raddr_b_i[4:0]] : mem[raddr_b_i[4:0]];
       assign rdata_c_raw[0] = raddr_c_i[5] ? mem_fp[raddr_c_i[4:0]] : mem[raddr_c_i[4:0]];
@@ -281,9 +268,9 @@ module cv32e40px_register_file #(
           .err_o      ( err_a_raw[ch]   )
       );
 
-      assign rdata_a_o[ch]      = (ch == 1 && !dualread_i[0]) ? '0 : rdata_a_cor[ch][DATA_WIDTH-1:0];
-      assign err_single_a_o[ch] = rport_a_en[ch] ? err_a_raw[ch][0] : 1'b0;
-      assign err_mult_a_o[ch]   = rport_a_en[ch] ? err_a_raw[ch][1] : 1'b0;
+      assign rdata_a_o[ch]      = rdata_a_cor[ch][DATA_WIDTH-1:0];
+      assign err_single_a_o[ch] = err_a_raw[ch][0];
+      assign err_mult_a_o[ch]   = err_a_raw[ch][1];
 
       cv32e40px_scrub_buffer #(
           .ADDR_WIDTH ( ADDR_WIDTH ),
@@ -314,9 +301,9 @@ module cv32e40px_register_file #(
           .err_o      ( err_b_raw[ch]   )
       );
 
-      assign rdata_b_o[ch]      = (ch == 1 && !dualread_i[1]) ? '0 : rdata_b_cor[ch][DATA_WIDTH-1:0];
-      assign err_single_b_o[ch] = rport_b_en[ch] ? err_b_raw[ch][0] : 1'b0;
-      assign err_mult_b_o[ch]   = rport_b_en[ch] ? err_b_raw[ch][1] : 1'b0;
+      assign rdata_b_o[ch]      = rdata_b_cor[ch][DATA_WIDTH-1:0];
+      assign err_single_b_o[ch] = err_b_raw[ch][0];
+      assign err_mult_b_o[ch]   = err_b_raw[ch][1];
 
       cv32e40px_scrub_buffer #(
           .ADDR_WIDTH ( ADDR_WIDTH ),
@@ -347,9 +334,9 @@ module cv32e40px_register_file #(
           .err_o      ( err_c_raw[ch]   )
       );
 
-      assign rdata_c_o[ch]      = (ch == 1 && !dualread_i[2]) ? '0 : rdata_c_cor[ch][DATA_WIDTH-1:0];
-      assign err_single_c_o[ch] = rport_c_en[ch] ? err_c_raw[ch][0] : 1'b0;
-      assign err_mult_c_o[ch]   = rport_c_en[ch] ? err_c_raw[ch][1] : 1'b0;
+      assign rdata_c_o[ch]      = rdata_c_cor[ch][DATA_WIDTH-1:0];
+      assign err_single_c_o[ch] = err_c_raw[ch][0];
+      assign err_mult_c_o[ch]   = err_c_raw[ch][1];
 
       cv32e40px_scrub_buffer #(
           .ADDR_WIDTH ( ADDR_WIDTH ),
