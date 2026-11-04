@@ -1,0 +1,3 @@
+[submodule "Test/fault_injection/InjectaFault"]
+	path = Test/fault_injection/InjectaFault
+	url = https://github.com/pulp-platform/InjectaFault.git
