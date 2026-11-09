@@ -1,7 +1,4 @@
-# Copyright 2023 ETH Zurich and University of Bologna.
-# Solderpad Hardware License, Version 0.51, see LICENSE for details.
-# SPDX-License-Identifier: SHL-0.51
-#
+# Author: Lorenzo Ambrogiani - ambrogiani.lorenzo2@studio.unibo.it
 # Description: Netlist extraction procedures for Fault Injection on the
 #              CV32E40PX Register File (SECDED ECC & Scrubbing) in core-v-verif.
 

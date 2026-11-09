@@ -1,7 +1,4 @@
-# Copyright 2023 ETH Zurich and University of Bologna.
-# Solderpad Hardware License, Version 0.51, see LICENSE for details.
-# SPDX-License-Identifier: SHL-0.51
-#
+# Author: Lorenzo Ambrogiani - ambrogiani.lorenzo2@studio.unibo.it
 # Description: Fault Injection configuration script for CV32E40PX Register File
 
 # transcript quietly
@@ -34,7 +31,7 @@ set target_group          "mem"
 #   - Single index : e.g. 5        (targets only mem[5])
 #   - List         : e.g. {1 5 10} (randomly picks among mem[1], mem[5], mem[10])
 #   - All          : "all"         (randomly picks among all valid registers)
-set target_reg_index      1
+set target_reg_index      15
 
 # Choose which bit to flip inside the selected register:
 #   - Random bit   : -1            (InjectaFault picks a random bit in [38:0] using 'seed')
@@ -49,12 +46,12 @@ set target_scrub_channels "all"    ;# 0, 1 (if X_DUALREAD=1), or "all"
 # ==============================================================================
 #  3. Timing & Injection Mode (Single Bitflip vs Periodic)
 # ==============================================================================
-set inject_start_time            10000ns
+set inject_start_time            1000ns
 set inject_stop_time             0
 set injection_clock              "[core_path]/clk_i"
 set injection_clock_trigger      0   ;# Inject on low clock phase to avoid setup/hold race
 
-# --- MODE A: Single Bitflip (ACTIVE) ---
+# --- MODE A: Single Bitflip (ACTIVE - comment for periodic campaign) ---
 # Injects 1 bitflip at the first falling clock phase after inject_start_time, then stops.
 set fault_period                 1
 set max_num_fault_inject         1
@@ -62,7 +59,7 @@ set rand_initial_injection_phase 0
 
 # --- MODE B: Periodic Bitflips (DISABLED - uncomment for periodic campaign) ---
 # set fault_period                 100 ;# Inject 1 fault every N clock cycles
-# set max_num_fault_inject         0   ;# 0 = unlimited (until simulation ends or inject_stop_time)
+# set max_num_fault_inject         10   ;# 0 = unlimited (until simulation ends or inject_stop_time)
 # set rand_initial_injection_phase 0   ;# 1 = randomize initial cycle offset within fault_period
 
 set signal_fault_duration        20ns
@@ -98,3 +95,8 @@ set assertion_disable_list  [list]
 
 # Start the fault injection engine
 source $script_base_path/inject_fault.tcl
+
+
+# Waveform dump for Register File nets
+do /srv/home/lorenzo.ambrogiani2/Tesi/core-v-verif/cv32e40px/sim/uvmt/vsim_results/rf2_wave_format.do
+run -all 
