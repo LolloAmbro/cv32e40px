@@ -25,6 +25,7 @@ sources:
   include_dirs:
     - rtl/include
   files:
+    - gf22-standalone-ip/sourcecode/tc_clk.sv
     - rtl/include/cv32e40px_core_v_xif_pkg.sv
     - rtl/include/cv32e40px_fpu_pkg.sv
     - rtl/include/cv32e40px_apu_core_pkg.sv
@@ -55,10 +56,11 @@ sources:
     - rtl/cv32e40px_fp_wrapper.sv
     - rtl/cv32e40px_x_disp.sv
     - rtl/cv32e40px_top.sv
-    - target: asic
+    - gf22-standalone-ip/sourcecode/cv32e40px_top_wrap.sv
+    - target: all(cv32e40px_latch_regfile, not(cv32e40px_ff_regfile))
       files:
         - rtl/cv32e40px_register_file_latch.sv
-    - target: not(asic)
+    - target: all(cv32e40px_ff_regfile, not(cv32e40px_latch_regfile))
       files:
         - rtl/cv32e40px_register_file_ff.sv
     - target: rtl
