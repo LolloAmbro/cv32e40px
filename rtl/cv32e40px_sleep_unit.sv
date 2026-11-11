@@ -151,10 +151,10 @@ module cv32e40px_sleep_unit #(
   assign fetch_enable_o = fetch_enable_q;
 
   // Main clock gate of CV32E40P
-  cv32e40px_clock_gate core_clock_gate_i (
+  tc_clk_gating core_clock_gate_i (
       .clk_i       (clk_ungated_i),
       .en_i        (clock_en),
-      .scan_cg_en_i(scan_cg_en_i),
+      .test_en_i   (scan_cg_en_i),
       .clk_o       (clk_gated_o)
   );
 
