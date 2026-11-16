@@ -35,6 +35,11 @@ ${DESIGN_RTL_DIR}/include/cv32e40px_pkg.sv
 ${DESIGN_RTL_DIR}/include/cv32e40px_core_v_xif_pkg.sv
 ${DESIGN_RTL_DIR}/cv32e40px_if_stage.sv
 ${DESIGN_RTL_DIR}/cv32e40px_cs_registers.sv
+${DESIGN_RTL_DIR}/vendor/redundancy_cells/rtl/lowrisc_ecc/prim_secded_pkg.sv
+${DESIGN_RTL_DIR}/vendor/redundancy_cells/rtl/lowrisc_ecc/prim_secded_39_32_enc.sv
+${DESIGN_RTL_DIR}/vendor/redundancy_cells/rtl/lowrisc_ecc/prim_secded_39_32_cor.sv
+${DESIGN_RTL_DIR}/cv32e40px_scrub_buffer.sv
+${DESIGN_RTL_DIR}/cv32e40px_scrub_arbiter.sv
 ${DESIGN_RTL_DIR}/cv32e40px_register_file_ff.sv
 ${DESIGN_RTL_DIR}/cv32e40px_load_store_unit.sv
 ${DESIGN_RTL_DIR}/cv32e40px_id_stage.sv

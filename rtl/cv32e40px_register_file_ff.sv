@@ -16,111 +16,25 @@
 //                 Davide Schiavone - pschiavo@iis.ee.ethz.ch                 //
 //                 ECC & Scrubbing Integration                                //
 //                                                                            //
-// Design Name:    RISC-V register file with SECDED ECC and Scrubbing         //
+// Design Name:    RISC-V register file with parametric SECDED ECC/Scrubbing  //
 // Project Name:   RI5CY / CV32E40PX                                          //
 // Language:       SystemVerilog                                              //
 //                                                                            //
-// Description:    Register file with 31x 39 bit wide registers. Register 0   //
-//                 is fixed to 0. This register file is based on flip-flops.  //
-//                 Also supports the fp-register file now if FPU=1            //
-//                 If ZFINX is 1, floating point operations take values       //
-//                 from the X register file                                   //
+// Description:    Register file with 31x 32/39 bit wide registers.           //
+//                 Register 0 is fixed to 0. Based on flip-flops.             //
+//                 Supports FP-register file if FPU=1 (unless ZFINX=1).       //
+//                 Supports parametric SECDED (39,32) ECC and scrubbing       //
+//                 when ECC=1.                                                //
 ////////////////////////////////////////////////////////////////////////////////
 
-//------------------------------------------------------------------------------
-// Helper Module: Single-Entry Scrubbing Buffer with Write Snooping
-//------------------------------------------------------------------------------
-module cv32e40px_scrub_buffer #(
-    parameter int unsigned ADDR_WIDTH = 5,
-    parameter int unsigned ECC_WIDTH  = 39,
-    parameter int unsigned FPU        = 0,
-    parameter int unsigned ZFINX      = 0
-) (
-    input  logic                  clk,
-    input  logic                  rst_n,
-
-    // Capture interface from Corrector
-    input  logic                  err_detect_i,
-    input  logic [ADDR_WIDTH-1:0] err_addr_i,
-    input  logic [ECC_WIDTH-1:0]  err_data_i,
-
-    // Snooping interface (Normal Write Ports W1 & W2)
-    input  logic                  snoop_we_a_i,
-    input  logic [ADDR_WIDTH-1:0] snoop_waddr_a_i,
-    input  logic                  snoop_we_b_i,
-    input  logic [ADDR_WIDTH-1:0] snoop_waddr_b_i,
-
-    // Arbiter handshake interface
-    input  logic                  pop_i,
-    output logic                  valid_o,
-    output logic [ADDR_WIDTH-1:0] addr_o,
-    output logic [ECC_WIDTH-1:0]  data_o
-);
-
-  logic                  valid_q;
-  logic [ADDR_WIDTH-1:0] addr_q;
-  logic [ECC_WIDTH-1:0]  data_q;
-
-  logic is_r0;
-  logic snoop_hit_on_capture;
-  logic snoop_hit_on_stored;
-  logic capture_en;
-
-  // Check if the address refers to integer register R0 (hardwired to 0)
-  generate
-    if (FPU == 1 && ZFINX == 0 && ADDR_WIDTH > 5) begin : gen_r0_check_fp
-      assign is_r0 = (err_addr_i[5:0] == 6'b000000);
-    end else begin : gen_r0_check_int
-      assign is_r0 = (err_addr_i[4:0] == 5'b00000);
-    end
-  endgenerate
-
-  // Collision check during error detection cycle (Cycle T)
-  assign snoop_hit_on_capture = (snoop_we_a_i && (snoop_waddr_a_i == err_addr_i)) ||
-                                (snoop_we_b_i && (snoop_waddr_b_i == err_addr_i));
-
-  // Collision check while waiting in the buffer (Cycles T+1 .. T+N)
-  assign snoop_hit_on_stored  = (snoop_we_a_i && (snoop_waddr_a_i == addr_q)) ||
-                                (snoop_we_b_i && (snoop_waddr_b_i == addr_q));
-
-  // Valid error capture condition (ignore R0 and immediate WAR collisions)
-  assign capture_en = err_detect_i && !is_r0 && !snoop_hit_on_capture;
-
-  always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      valid_q <= 1'b0;
-      addr_q  <= '0;
-      data_q  <= '0;
-    end else begin
-      if (capture_en) begin
-        // Load new corrected word (or overwrite existing/popped entry)
-        valid_q <= 1'b1;
-        addr_q  <= err_addr_i;
-        data_q  <= err_data_i;
-      end else if (pop_i || snoop_hit_on_stored) begin
-        // Invalidate if consumed by arbiter OR overwritten by normal RF write
-        valid_q <= 1'b0;
-      end
-    end
-  end
-
-  assign valid_o = valid_q;
-  assign addr_o  = addr_q;
-  assign data_o  = data_q;
-
-endmodule
-
-
-//------------------------------------------------------------------------------
-// Main Module: Register File with ECC & Scrubbing
-//------------------------------------------------------------------------------
 module cv32e40px_register_file #(
     parameter ADDR_WIDTH = 5,
     parameter DATA_WIDTH = 32,
     parameter FPU        = 0,
     parameter ZFINX      = 0,
     parameter COREV_X_IF = 0,
-    parameter X_DUALREAD = 0
+    parameter X_DUALREAD = 0,
+    parameter ECC        = 1
 ) (
     // Clock and Reset
     input  logic clk,
@@ -152,7 +66,7 @@ module cv32e40px_register_file #(
     input  logic [DATA_WIDTH-1:0]               wdata_b_i,
     input  logic                                we_b_i,
 
-    // ECC Error Reporting Outputs (towards Control Unit)
+    // ECC Error Reporting Outputs
     output logic [X_DUALREAD:0]                 err_single_a_o,
     output logic [X_DUALREAD:0]                 err_mult_a_o,
     output logic [X_DUALREAD:0]                 err_single_b_o,
@@ -161,8 +75,9 @@ module cv32e40px_register_file #(
     output logic [X_DUALREAD:0]                 err_mult_c_o
 );
 
-  // ECC local parameters (SECDED 39,32)
+  // ECC and memory width local parameters (SECDED 39,32 when ECC != 0, else 32-bit)
   localparam int unsigned ECC_WIDTH = DATA_WIDTH + 7;
+  localparam int unsigned MEM_WIDTH = (ECC != 0) ? ECC_WIDTH : DATA_WIDTH;
 
   // number of integer registers
   localparam NUM_WORDS     = 2 ** (ADDR_WIDTH - 1);
@@ -170,35 +85,29 @@ module cv32e40px_register_file #(
   localparam NUM_FP_WORDS  = 2 ** (ADDR_WIDTH - 1);
   localparam NUM_TOT_WORDS = FPU ? (ZFINX ? NUM_WORDS : NUM_WORDS + NUM_FP_WORDS) : NUM_WORDS;
 
-  // integer register file (39-bit wide for ECC)
-  logic [   NUM_WORDS-1:0][ECC_WIDTH-1:0] mem;
+  // integer register file
+  logic [   NUM_WORDS-1:0][MEM_WIDTH-1:0] mem;
 
-  // fp register file (39-bit wide for ECC)
-  logic [NUM_FP_WORDS-1:0][ECC_WIDTH-1:0] mem_fp;
+  // fp register file
+  logic [NUM_FP_WORDS-1:0][MEM_WIDTH-1:0] mem_fp;
 
-  // Effective write signals after Write / Scrubbing MUXes
+  // Effective write signals driving the Write Address Decoder and register array
   logic [  ADDR_WIDTH-1:0]                waddr_a;
   logic [  ADDR_WIDTH-1:0]                waddr_b;
-  logic [   ECC_WIDTH-1:0]                wdata_a_mux;
-  logic [   ECC_WIDTH-1:0]                wdata_b_mux;
+  logic [   MEM_WIDTH-1:0]                wdata_a_mux;
+  logic [   MEM_WIDTH-1:0]                wdata_b_mux;
   logic                                   we_a_mux;
   logic                                   we_b_mux;
-
-  // Encoded incoming write data
-  logic [   ECC_WIDTH-1:0]                wdata_a_enc;
-  logic [   ECC_WIDTH-1:0]                wdata_b_enc;
 
   // write enable signals for all registers
   logic [NUM_TOT_WORDS-1:0]               we_a_dec;
   logic [NUM_TOT_WORDS-1:0]               we_b_dec;
 
   //-----------------------------------------------------------------------------
-  //-- READ : Raw Encoded Data Extraction & Corrector Instantiation
+  //-- READ : Raw Data Extraction from Register Array
   //-----------------------------------------------------------------------------
-  logic [X_DUALREAD:0][ECC_WIDTH-1:0]  rdata_a_raw, rdata_b_raw, rdata_c_raw;
-  logic [X_DUALREAD:0][ECC_WIDTH-1:0]  rdata_a_cor, rdata_b_cor, rdata_c_cor;
+  logic [X_DUALREAD:0][MEM_WIDTH-1:0]  rdata_a_raw, rdata_b_raw, rdata_c_raw;
   logic [X_DUALREAD:0][ADDR_WIDTH-1:0] raddr_a_eff, raddr_b_eff, raddr_c_eff;
-  logic [X_DUALREAD:0][1:0]            err_a_raw,   err_b_raw,   err_c_raw;
 
   generate
     if (COREV_X_IF != 0 && X_DUALREAD != 0) begin : gen_corev_x_if_dualread
@@ -249,220 +158,232 @@ module cv32e40px_register_file #(
   endgenerate
 
   //-----------------------------------------------------------------------------
-  //-- CORRECTORS & SCRUBBING BUFFERS
+  //-- ECC & SCRUBBING LOGIC (Active when ECC != 0, Bypassed when ECC == 0)
   //-----------------------------------------------------------------------------
-  logic [X_DUALREAD:0]                 sb_a_valid, sb_b_valid, sb_c_valid;
-  logic [X_DUALREAD:0]                 sb_a_pop,   sb_b_pop,   sb_c_pop;
-  logic [X_DUALREAD:0][ADDR_WIDTH-1:0] sb_a_addr,  sb_b_addr,  sb_c_addr;
-  logic [X_DUALREAD:0][ECC_WIDTH-1:0]  sb_a_data,  sb_b_data,  sb_c_data;
-
   genvar ch;
   generate
-    for (ch = 0; ch <= X_DUALREAD; ch++) begin : gen_ecc_read_channels
+    if (ECC != 0) begin : gen_ecc
 
-      // --- PORT A Corrector & Scrub Buffer ---
-      prim_secded_39_32_cor u_cor_a (
-          .d_i        ( rdata_a_raw[ch] ),
-          .d_o        ( rdata_a_cor[ch] ),
-          .syndrome_o (                 ),
-          .err_o      ( err_a_raw[ch]   )
-      );
+      localparam int unsigned NUM_CH = X_DUALREAD + 1;
 
-      assign rdata_a_o[ch]      = rdata_a_cor[ch][DATA_WIDTH-1:0];
-      assign err_single_a_o[ch] = err_a_raw[ch][0];
-      assign err_mult_a_o[ch]   = err_a_raw[ch][1];
+      // Decoded/corrected read signals
+      logic [X_DUALREAD:0][ECC_WIDTH-1:0]  rdata_a_cor, rdata_b_cor, rdata_c_cor;
+      logic [X_DUALREAD:0][1:0]            err_a_raw,   err_b_raw,   err_c_raw;
 
-      cv32e40px_scrub_buffer #(
+      // Scrubbing buffers interconnect
+      logic [X_DUALREAD:0]                 sb_a_valid, sb_b_valid, sb_c_valid;
+      logic [X_DUALREAD:0]                 sb_a_pop,   sb_b_pop,   sb_c_pop;
+      logic [X_DUALREAD:0][ADDR_WIDTH-1:0] sb_a_addr,  sb_b_addr,  sb_c_addr;
+      logic [X_DUALREAD:0][ECC_WIDTH-1:0]  sb_a_data,  sb_b_data,  sb_c_data;
+
+      // Combined Port B & Port C scrubbing signals for Arbiter 2 (Port B > Port C)
+      logic [2*NUM_CH-1:0]                 sb_bc_valid;
+      logic [2*NUM_CH-1:0]                 sb_bc_pop;
+      logic [2*NUM_CH-1:0][ADDR_WIDTH-1:0] sb_bc_addr;
+      logic [2*NUM_CH-1:0][ECC_WIDTH-1:0]  sb_bc_data;
+
+      // Scrubbing arbiters outputs
+      logic                                scrub_we_a,  scrub_we_b;
+      logic [ADDR_WIDTH-1:0]               arb_a_addr,  arb_bc_addr;
+      logic [ECC_WIDTH-1:0]                arb_a_data,  arb_bc_data;
+
+      // Encoded incoming write data
+      logic [ECC_WIDTH-1:0]                wdata_a_enc, wdata_b_enc;
+
+      //-------------------------------------------------------------------------
+      //-- READ : Correctors & Scrubbing Buffers per Channel
+      //-------------------------------------------------------------------------
+      for (ch = 0; ch <= X_DUALREAD; ch++) begin : gen_ecc_read_channels
+
+        // --- PORT A Corrector & Scrub Buffer ---
+        prim_secded_39_32_cor u_cor_a (
+            .d_i        ( rdata_a_raw[ch] ),
+            .d_o        ( rdata_a_cor[ch] ),
+            .syndrome_o (                 ),
+            .err_o      ( err_a_raw[ch]   )
+        );
+
+        assign rdata_a_o[ch]      = rdata_a_cor[ch][DATA_WIDTH-1:0];
+        assign err_single_a_o[ch] = err_a_raw[ch][0];
+        assign err_mult_a_o[ch]   = err_a_raw[ch][1];
+
+        cv32e40px_scrub_buffer #(
+            .ADDR_WIDTH ( ADDR_WIDTH ),
+            .ECC_WIDTH  ( ECC_WIDTH  )
+        ) u_scrub_buf_a (
+            .clk             ( clk                ),
+            .rst_n           ( rst_n              ),
+            .err_detect_i    ( err_single_a_o[ch] ),
+            .err_addr_i      ( raddr_a_eff[ch]    ),
+            .err_data_i      ( rdata_a_cor[ch]    ),
+            .snoop_we_a_i    ( we_a_i             ),
+            .snoop_waddr_a_i ( waddr_a_i          ),
+            .snoop_we_b_i    ( we_b_i             ),
+            .snoop_waddr_b_i ( waddr_b_i          ),
+            .pop_i           ( sb_a_pop[ch]       ),
+            .valid_o         ( sb_a_valid[ch]     ),
+            .addr_o          ( sb_a_addr[ch]      ),
+            .data_o          ( sb_a_data[ch]      )
+        );
+
+        // --- PORT B Corrector & Scrub Buffer ---
+        prim_secded_39_32_cor u_cor_b (
+            .d_i        ( rdata_b_raw[ch] ),
+            .d_o        ( rdata_b_cor[ch] ),
+            .syndrome_o (                 ),
+            .err_o      ( err_b_raw[ch]   )
+        );
+
+        assign rdata_b_o[ch]      = rdata_b_cor[ch][DATA_WIDTH-1:0];
+        assign err_single_b_o[ch] = err_b_raw[ch][0];
+        assign err_mult_b_o[ch]   = err_b_raw[ch][1];
+
+        cv32e40px_scrub_buffer #(
+            .ADDR_WIDTH ( ADDR_WIDTH ),
+            .ECC_WIDTH  ( ECC_WIDTH  )
+        ) u_scrub_buf_b (
+            .clk             ( clk                ),
+            .rst_n           ( rst_n              ),
+            .err_detect_i    ( err_single_b_o[ch] ),
+            .err_addr_i      ( raddr_b_eff[ch]    ),
+            .err_data_i      ( rdata_b_cor[ch]    ),
+            .snoop_we_a_i    ( we_a_i             ),
+            .snoop_waddr_a_i ( waddr_a_i          ),
+            .snoop_we_b_i    ( we_b_i             ),
+            .snoop_waddr_b_i ( waddr_b_i          ),
+            .pop_i           ( sb_b_pop[ch]       ),
+            .valid_o         ( sb_b_valid[ch]     ),
+            .addr_o          ( sb_b_addr[ch]      ),
+            .data_o          ( sb_b_data[ch]      )
+        );
+
+        // --- PORT C Corrector & Scrub Buffer ---
+        prim_secded_39_32_cor u_cor_c (
+            .d_i        ( rdata_c_raw[ch] ),
+            .d_o        ( rdata_c_cor[ch] ),
+            .syndrome_o (                 ),
+            .err_o      ( err_c_raw[ch]   )
+        );
+
+        assign rdata_c_o[ch]      = rdata_c_cor[ch][DATA_WIDTH-1:0];
+        assign err_single_c_o[ch] = err_c_raw[ch][0];
+        assign err_mult_c_o[ch]   = err_c_raw[ch][1];
+
+        cv32e40px_scrub_buffer #(
+            .ADDR_WIDTH ( ADDR_WIDTH ),
+            .ECC_WIDTH  ( ECC_WIDTH  )
+        ) u_scrub_buf_c (
+            .clk             ( clk                ),
+            .rst_n           ( rst_n              ),
+            .err_detect_i    ( err_single_c_o[ch] ),
+            .err_addr_i      ( raddr_c_eff[ch]    ),
+            .err_data_i      ( rdata_c_cor[ch]    ),
+            .snoop_we_a_i    ( we_a_i             ),
+            .snoop_waddr_a_i ( waddr_a_i          ),
+            .snoop_we_b_i    ( we_b_i             ),
+            .snoop_waddr_b_i ( waddr_b_i          ),
+            .pop_i           ( sb_c_pop[ch]       ),
+            .valid_o         ( sb_c_valid[ch]     ),
+            .addr_o          ( sb_c_addr[ch]      ),
+            .data_o          ( sb_c_data[ch]      )
+        );
+
+      end
+
+      //-------------------------------------------------------------------------
+      //-- SCRUB ARBITER 1 (Upper Branch: Port A -> Write Port A)
+      //-------------------------------------------------------------------------
+      cv32e40px_scrub_arbiter #(
+          .NUM_REQS   ( NUM_CH     ),
           .ADDR_WIDTH ( ADDR_WIDTH ),
-          .ECC_WIDTH  ( ECC_WIDTH  ),
-          .FPU        ( FPU        ),
-          .ZFINX      ( ZFINX      )
-      ) u_scrub_buf_a (
-          .clk             ( clk                ),
-          .rst_n           ( rst_n              ),
-          .err_detect_i    ( err_single_a_o[ch] ), // Scrub only single-bit correctable errors
-          .err_addr_i      ( raddr_a_eff[ch]    ),
-          .err_data_i      ( rdata_a_cor[ch]    ),
-          .snoop_we_a_i    ( we_a_i             ),
-          .snoop_waddr_a_i ( waddr_a_i          ),
-          .snoop_we_b_i    ( we_b_i             ),
-          .snoop_waddr_b_i ( waddr_b_i          ),
-          .pop_i           ( sb_a_pop[ch]       ),
-          .valid_o         ( sb_a_valid[ch]     ),
-          .addr_o          ( sb_a_addr[ch]      ),
-          .data_o          ( sb_a_data[ch]      )
+          .ECC_WIDTH  ( ECC_WIDTH  )
+      ) u_scrub_arb_a (
+          .req_valid_i   ( sb_a_valid ),
+          .req_addr_i    ( sb_a_addr  ),
+          .req_data_i    ( sb_a_data  ),
+          .req_pop_o     ( sb_a_pop   ),
+          .we_own_i      ( we_a_i     ),
+          .we_other_i    ( we_b_i     ),
+          .waddr_other_i ( waddr_b_i  ),
+          .scrub_we_o    ( scrub_we_a ),
+          .scrub_addr_o  ( arb_a_addr ),
+          .scrub_data_o  ( arb_a_data )
       );
 
-      // --- PORT B Corrector & Scrub Buffer ---
-      prim_secded_39_32_cor u_cor_b (
-          .d_i        ( rdata_b_raw[ch] ),
-          .d_o        ( rdata_b_cor[ch] ),
-          .syndrome_o (                 ),
-          .err_o      ( err_b_raw[ch]   )
-      );
+      //-------------------------------------------------------------------------
+      //-- SCRUB ARBITER 2 (Lower Branch: Port B > Port C -> Write Port B)
+      //-------------------------------------------------------------------------
+      assign sb_bc_valid          = {sb_c_valid, sb_b_valid};
+      assign sb_bc_addr           = {sb_c_addr,  sb_b_addr};
+      assign sb_bc_data           = {sb_c_data,  sb_b_data};
+      assign {sb_c_pop, sb_b_pop} = sb_bc_pop;
 
-      assign rdata_b_o[ch]      = rdata_b_cor[ch][DATA_WIDTH-1:0];
-      assign err_single_b_o[ch] = err_b_raw[ch][0];
-      assign err_mult_b_o[ch]   = err_b_raw[ch][1];
-
-      cv32e40px_scrub_buffer #(
+      cv32e40px_scrub_arbiter #(
+          .NUM_REQS   ( 2 * NUM_CH ),
           .ADDR_WIDTH ( ADDR_WIDTH ),
-          .ECC_WIDTH  ( ECC_WIDTH  ),
-          .FPU        ( FPU        ),
-          .ZFINX      ( ZFINX      )
-      ) u_scrub_buf_b (
-          .clk             ( clk                ),
-          .rst_n           ( rst_n              ),
-          .err_detect_i    ( err_single_b_o[ch] ),
-          .err_addr_i      ( raddr_b_eff[ch]    ),
-          .err_data_i      ( rdata_b_cor[ch]    ),
-          .snoop_we_a_i    ( we_a_i             ),
-          .snoop_waddr_a_i ( waddr_a_i          ),
-          .snoop_we_b_i    ( we_b_i             ),
-          .snoop_waddr_b_i ( waddr_b_i          ),
-          .pop_i           ( sb_b_pop[ch]       ),
-          .valid_o         ( sb_b_valid[ch]     ),
-          .addr_o          ( sb_b_addr[ch]      ),
-          .data_o          ( sb_b_data[ch]      )
+          .ECC_WIDTH  ( ECC_WIDTH  )
+      ) u_scrub_arb_bc (
+          .req_valid_i   ( sb_bc_valid ),
+          .req_addr_i    ( sb_bc_addr  ),
+          .req_data_i    ( sb_bc_data  ),
+          .req_pop_o     ( sb_bc_pop   ),
+          .we_own_i      ( we_b_i      ),
+          .we_other_i    ( we_a_i      ),
+          .waddr_other_i ( waddr_a_i   ),
+          .scrub_we_o    ( scrub_we_b  ),
+          .scrub_addr_o  ( arb_bc_addr ),
+          .scrub_data_o  ( arb_bc_data )
       );
 
-      // --- PORT C Corrector & Scrub Buffer ---
-      prim_secded_39_32_cor u_cor_c (
-          .d_i        ( rdata_c_raw[ch] ),
-          .d_o        ( rdata_c_cor[ch] ),
-          .syndrome_o (                 ),
-          .err_o      ( err_c_raw[ch]   )
+      //-------------------------------------------------------------------------
+      //-- WRITE : Encoders & Write Multiplexers (Normal Write > Scrubbing Write)
+      //-------------------------------------------------------------------------
+      prim_secded_39_32_enc u_enc_a (
+          .in  ( wdata_a_i   ),
+          .out ( wdata_a_enc )
       );
 
-      assign rdata_c_o[ch]      = rdata_c_cor[ch][DATA_WIDTH-1:0];
-      assign err_single_c_o[ch] = err_c_raw[ch][0];
-      assign err_mult_c_o[ch]   = err_c_raw[ch][1];
-
-      cv32e40px_scrub_buffer #(
-          .ADDR_WIDTH ( ADDR_WIDTH ),
-          .ECC_WIDTH  ( ECC_WIDTH  ),
-          .FPU        ( FPU        ),
-          .ZFINX      ( ZFINX      )
-      ) u_scrub_buf_c (
-          .clk             ( clk                ),
-          .rst_n           ( rst_n              ),
-          .err_detect_i    ( err_single_c_o[ch] ),
-          .err_addr_i      ( raddr_c_eff[ch]    ),
-          .err_data_i      ( rdata_c_cor[ch]    ),
-          .snoop_we_a_i    ( we_a_i             ),
-          .snoop_waddr_a_i ( waddr_a_i          ),
-          .snoop_we_b_i    ( we_b_i             ),
-          .snoop_waddr_b_i ( waddr_b_i          ),
-          .pop_i           ( sb_c_pop[ch]       ),
-          .valid_o         ( sb_c_valid[ch]     ),
-          .addr_o          ( sb_c_addr[ch]      ),
-          .data_o          ( sb_c_data[ch]      )
+      prim_secded_39_32_enc u_enc_b (
+          .in  ( wdata_b_i   ),
+          .out ( wdata_b_enc )
       );
+
+      // Write Port A MUX (Normal W1 has strict priority over Scrub Arbiter 1)
+      assign we_a_mux    = we_a_i ? 1'b1        : scrub_we_a;
+      assign waddr_a     = we_a_i ? waddr_a_i   : arb_a_addr;
+      assign wdata_a_mux = we_a_i ? wdata_a_enc : arb_a_data;
+
+      // Write Port B MUX (Normal W2 has strict priority over Scrub Arbiter 2)
+      assign we_b_mux    = we_b_i ? 1'b1        : scrub_we_b;
+      assign waddr_b     = we_b_i ? waddr_b_i   : arb_bc_addr;
+      assign wdata_b_mux = we_b_i ? wdata_b_enc : arb_bc_data;
+
+    end else begin : gen_no_ecc
+
+      // Direct read bypass (no ECC decoding)
+      assign rdata_a_o      = rdata_a_raw;
+      assign rdata_b_o      = rdata_b_raw;
+      assign rdata_c_o      = rdata_c_raw;
+
+      // Tie off ECC error reporting outputs
+      assign err_single_a_o = '0;
+      assign err_mult_a_o   = '0;
+      assign err_single_b_o = '0;
+      assign err_mult_b_o   = '0;
+      assign err_single_c_o = '0;
+      assign err_mult_c_o   = '0;
+
+      // Direct write bypass (no ECC encoding, no scrubbing)
+      assign we_a_mux       = we_a_i;
+      assign waddr_a        = waddr_a_i;
+      assign wdata_a_mux    = wdata_a_i;
+
+      assign we_b_mux       = we_b_i;
+      assign waddr_b        = waddr_b_i;
+      assign wdata_b_mux    = wdata_b_i;
 
     end
   endgenerate
-
-  //-----------------------------------------------------------------------------
-  //-- SCRUB ARBITER 1 (Upper Branch -> Write Port A)
-  //-----------------------------------------------------------------------------
-  logic                  arb_a_req;
-  logic [ADDR_WIDTH-1:0] arb_a_addr;
-  logic [ECC_WIDTH-1:0]  arb_a_data;
-  logic                  arb_a_collision;
-  logic                  scrub_we_a;
-
-  always_comb begin
-    arb_a_req  = 1'b0;
-    arb_a_addr = '0;
-    arb_a_data = '0;
-    sb_a_pop   = '0;
-
-    // Fixed priority selection among Port A channels (ch 0 > ch 1)
-    for (int idx = 0; idx <= X_DUALREAD; idx++) begin
-      if (!arb_a_req && sb_a_valid[idx]) begin
-        arb_a_req  = 1'b1;
-        arb_a_addr = sb_a_addr[idx];
-        arb_a_data = sb_a_data[idx];
-        // Pop the buffer only when Write Port A is free (no normal write on W1)
-        if (!we_a_i) begin
-          sb_a_pop[idx] = 1'b1;
-        end
-      end
-    end
-  end
-
-  // Same-cycle collision check with Write Port B (if W2 is writing the same address right now)
-  assign arb_a_collision = (we_b_i && (waddr_b_i == arb_a_addr));
-  // Execute scrubbing write on Port A only if W1 is free and W2 is not overwriting the same reg
-  assign scrub_we_a      = arb_a_req && !we_a_i && !arb_a_collision;
-
-  //-----------------------------------------------------------------------------
-  //-- SCRUB ARBITER 2 (Lower Branch -> Write Port B)
-  //-----------------------------------------------------------------------------
-  logic                  arb_bc_req;
-  logic [ADDR_WIDTH-1:0] arb_bc_addr;
-  logic [ECC_WIDTH-1:0]  arb_bc_data;
-  logic                  arb_bc_collision;
-  logic                  scrub_we_b;
-
-  always_comb begin
-    arb_bc_req  = 1'b0;
-    arb_bc_addr = '0;
-    arb_bc_data = '0;
-    sb_b_pop    = '0;
-    sb_c_pop    = '0;
-
-    // Priority: Port B channels first, then Port C channels
-    for (int idx = 0; idx <= X_DUALREAD; idx++) begin
-      if (!arb_bc_req && sb_b_valid[idx]) begin
-        arb_bc_req  = 1'b1;
-        arb_bc_addr = sb_b_addr[idx];
-        arb_bc_data = sb_b_data[idx];
-        if (!we_b_i) begin
-          sb_b_pop[idx] = 1'b1;
-        end
-      end
-    end
-
-    for (int idx = 0; idx <= X_DUALREAD; idx++) begin
-      if (!arb_bc_req && sb_c_valid[idx]) begin
-        arb_bc_req  = 1'b1;
-        arb_bc_addr = sb_c_addr[idx];
-        arb_bc_data = sb_c_data[idx];
-        if (!we_b_i) begin
-          sb_c_pop[idx] = 1'b1;
-        end
-      end
-    end
-  end
-
-  // Same-cycle collision check with Write Port A (if W1 is writing the same address right now)
-  assign arb_bc_collision = (we_a_i && (waddr_a_i == arb_bc_addr));
-  // Execute scrubbing write on Port B only if W2 is free and W1 is not overwriting the same reg
-  assign scrub_we_b       = arb_bc_req && !we_b_i && !arb_bc_collision;
-
-  //-----------------------------------------------------------------------------
-  //-- WRITE : Encoders & Write Multiplexers (Normal Write > Scrubbing Write)
-  //-----------------------------------------------------------------------------
-  prim_secded_39_32_enc u_enc_a (
-      .in  ( wdata_a_i   ),
-      .out ( wdata_a_enc )
-  );
-
-  prim_secded_39_32_enc u_enc_b (
-      .in  ( wdata_b_i   ),
-      .out ( wdata_b_enc )
-  );
-
-  // Write Port A MUX (Normal W1 has strict priority over Scrub Arbiter 1)
-  assign we_a_mux    = we_a_i ? 1'b1        : scrub_we_a;
-  assign waddr_a     = we_a_i ? waddr_a_i   : arb_a_addr;
-  assign wdata_a_mux = we_a_i ? wdata_a_enc : arb_a_data;
-
-  // Write Port B MUX (Normal W2 has strict priority over Scrub Arbiter 2)
-  assign we_b_mux    = we_b_i ? 1'b1        : scrub_we_b;
-  assign waddr_b     = we_b_i ? waddr_b_i   : arb_bc_addr;
-  assign wdata_b_mux = we_b_i ? wdata_b_enc : arb_bc_data;
 
   //-----------------------------------------------------------------------------
   //-- WRITE : Write Address Decoder (WAD), combinatorial process
@@ -508,7 +429,7 @@ module cv32e40px_register_file #(
       // Floating point registers
       for (l = 0; l < NUM_FP_WORDS; l++) begin
         always_ff @(posedge clk, negedge rst_n) begin : fp_regs
-          if (rst_n == 1'b0)                     mem_fp[l] <= '0;
+          if (rst_n == 1'b0)                      mem_fp[l] <= '0;
           else if (we_b_dec[l+NUM_WORDS] == 1'b1) mem_fp[l] <= wdata_b_mux;
           else if (we_a_dec[l+NUM_WORDS] == 1'b1) mem_fp[l] <= wdata_a_mux;
         end

@@ -31,7 +31,7 @@ set target_group          "mem"
 #   - Single index : e.g. 5        (targets only mem[5])
 #   - List         : e.g. {1 5 10} (randomly picks among mem[1], mem[5], mem[10])
 #   - All          : "all"         (randomly picks among all valid registers)
-set target_reg_index      15
+set target_reg_index      "all"
 
 # Choose which bit to flip inside the selected register:
 #   - Random bit   : -1            (InjectaFault picks a random bit in [38:0] using 'seed')
@@ -53,14 +53,14 @@ set injection_clock_trigger      0   ;# Inject on low clock phase to avoid setup
 
 # --- MODE A: Single Bitflip (ACTIVE - comment for periodic campaign) ---
 # Injects 1 bitflip at the first falling clock phase after inject_start_time, then stops.
-set fault_period                 1
-set max_num_fault_inject         1
-set rand_initial_injection_phase 0
+# set fault_period                 1
+# set max_num_fault_inject         1
+# set rand_initial_injection_phase 0
 
 # --- MODE B: Periodic Bitflips (DISABLED - uncomment for periodic campaign) ---
-# set fault_period                 100 ;# Inject 1 fault every N clock cycles
-# set max_num_fault_inject         10   ;# 0 = unlimited (until simulation ends or inject_stop_time)
-# set rand_initial_injection_phase 0   ;# 1 = randomize initial cycle offset within fault_period
+set fault_period                 100 ;# Inject 1 fault every N clock cycles
+set max_num_fault_inject         10   ;# 0 = unlimited (until simulation ends or inject_stop_time)
+set rand_initial_injection_phase 0   ;# 1 = randomize initial cycle offset within fault_period
 
 set signal_fault_duration        20ns
 set register_fault_duration      0ns ;# 0ns = release force immediately so FF holds flipped state (SEU)
@@ -97,6 +97,8 @@ set assertion_disable_list  [list]
 source $script_base_path/inject_fault.tcl
 
 
-# Waveform dump for Register File nets
-do /srv/home/lorenzo.ambrogiani2/Tesi/core-v-verif/cv32e40px/sim/uvmt/vsim_results/rf2_wave_format.do
+# Waveform dump for ECC Register File nets
+# do /srv/home/lorenzo.ambrogiani2/Tesi/core-v-verif/cv32e40px/sim/uvmt/vsim_results/rf2_wave_format.do 
+# Waveform dump for ECC Register File nets (ECC parametric)
+do /srv/home/lorenzo.ambrogiani2/Tesi/core-v-verif/cv32e40px/sim/uvmt/vsim_results/rf_ECC_param_wave_format.do
 run -all 

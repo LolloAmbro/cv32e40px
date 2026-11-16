@@ -30,6 +30,8 @@ sources:
     - rtl/include/cv32e40px_fpu_pkg.sv
     - rtl/include/cv32e40px_apu_core_pkg.sv
     - rtl/include/cv32e40px_pkg.sv
+    - rtl/cv32e40px_scrub_buffer.sv
+    - rtl/cv32e40px_scrub_arbiter.sv
     - rtl/cv32e40px_alu.sv
     - rtl/cv32e40px_alu_div.sv
     - rtl/cv32e40px_aligner.sv
